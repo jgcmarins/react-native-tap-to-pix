@@ -1,5 +1,11 @@
 # react-native-tap-to-pix
 
+[![npm version](https://img.shields.io/npm/v/react-native-tap-to-pix.svg)](https://www.npmjs.com/package/react-native-tap-to-pix)
+[![platform](https://img.shields.io/badge/platform-Android-3DDC84.svg)](#what-this-library-does)
+[![BACEN Pix spec](https://img.shields.io/badge/BACEN_Pix_spec-v1.0-0A66C2.svg)](https://www.bcb.gov.br/content/estabilidadefinanceira/pix/especificacoes_pix_aproximacao_android.pdf)
+[![types](https://img.shields.io/npm/types/react-native-tap-to-pix.svg)](https://www.npmjs.com/package/react-native-tap-to-pix)
+[![license](https://img.shields.io/npm/l/react-native-tap-to-pix.svg)](./LICENSE)
+
 React Native library that implements BACEN's **"Pix por aproximação para Android"** (Tap to Pix) protocol end-to-end. Ships the Android HCE service, the AID registration, the Expo config plugin, and a native bridge for the "Default contactless payment app" Android settings. Android only.
 
 > iOS is not supported. Apple does not currently allow third-party HCE services to claim Pix AIDs in Brazil; this library deliberately does not ship speculative iOS fallbacks.
