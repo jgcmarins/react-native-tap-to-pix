@@ -145,6 +145,129 @@ if (!isDefault()) {
 }
 ```
 
+## Setup — bare React Native (no Expo prebuild)
+
+Bare React Native projects can use this library as long as `expo-modules-core` is installed and configured. Most modern RN projects already have it (directly or as a transitive dep). If yours doesn't:
+
+```bash
+npm install expo expo-modules-core
+npx install-expo-modules
+```
+
+The Expo modules runtime autolinks the native bridge (`setPreferred` / `unsetPreferred` / `isDefault` / `openTapAndPaySettings`) for you. What the Expo config plugin would have written into your `android/` folder on `expo prebuild` has no equivalent in bare RN — you apply those edits once by hand, then they stay as part of your Android project source.
+
+### 1. Install
+
+```bash
+npm install react-native-tap-to-pix
+```
+
+### 2. Wire the Android project by hand
+
+Replace `com.yourapp` with your actual Android package (the `applicationId` in `android/app/build.gradle`).
+
+**a. `android/app/src/main/AndroidManifest.xml`** — inside `<manifest>`:
+
+```xml
+<uses-permission android:name="android.permission.NFC" />
+<uses-feature android:name="android.hardware.nfc" android:required="true" />
+<uses-feature android:name="android.hardware.nfc.hce" android:required="true" />
+```
+
+Inside `<application>`, add the HCE service:
+
+```xml
+<service
+    android:name=".nfc.PixTapToPixService"
+    android:exported="true"
+    android:permission="android.permission.BIND_NFC_SERVICE">
+    <intent-filter>
+        <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+        <category android:name="android.intent.category.DEFAULT" />
+    </intent-filter>
+    <meta-data
+        android:name="android.nfc.cardemulation.host_apdu_service"
+        android:resource="@xml/apduservice" />
+</service>
+```
+
+Inside your main Activity's existing `<activity>` tag, add the `pix` scheme intent filter:
+
+```xml
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="pix" />
+</intent-filter>
+```
+
+**b. `android/app/src/main/res/xml/apduservice.xml`** — copy verbatim from the library:
+
+```bash
+mkdir -p android/app/src/main/res/xml
+cp node_modules/react-native-tap-to-pix/android-native-templates/apduservice.xml \
+   android/app/src/main/res/xml/apduservice.xml
+```
+
+**c. `android/app/src/main/res/values/strings.xml`** — append two strings:
+
+```xml
+<string name="tap_to_pix_description" translatable="false">Tap to Pix</string>
+<string name="tap_to_pix_aid_group" translatable="false">Pagamentos Pix por aproximacao</string>
+```
+
+Customize `tap_to_pix_description` — it shows next to your app in the Android "Default contactless payment app" picker.
+
+**d. HCE service source** — copy the template and replace `__PACKAGE__` with your Android package. On macOS / Linux:
+
+```bash
+PKG=com.yourapp
+mkdir -p android/app/src/main/java/${PKG//./\/}/nfc
+sed "s/__PACKAGE__/$PKG/g" \
+  node_modules/react-native-tap-to-pix/android-native-templates/PixTapToPixService.kt.tmpl \
+  > android/app/src/main/java/${PKG//./\/}/nfc/PixTapToPixService.kt
+```
+
+On Windows, copy the `.kt.tmpl` file by hand to `android/app/src/main/java/<your/package/path>/nfc/PixTapToPixService.kt` and replace every occurrence of `__PACKAGE__` in the file with your package name.
+
+### 3. Rebuild
+
+```bash
+cd android && ./gradlew clean && cd ..
+npm run android
+```
+
+### 4. Handle the `pix://` URI in JS
+
+No expo-router required — the core React Native `Linking` API is enough:
+
+```tsx
+import { useEffect } from 'react';
+import { Linking } from 'react-native';
+import { parsePixUri } from 'react-native-tap-to-pix';
+
+export default function App() {
+  useEffect(() => {
+    const handle = (url: string | null) => {
+      if (!url) return;
+      const parsed = parsePixUri(url);
+      if (parsed?.qr) {
+        // Hand off to your payment flow with parsed.qr (the EMV string).
+      }
+    };
+    Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener('url', ({ url }) => handle(url));
+    return () => sub.remove();
+  }, []);
+  return <YourApp />;
+}
+```
+
+### Keeping the manual wiring in sync across upgrades
+
+In Expo projects the config plugin re-runs on every `expo prebuild --clean`, so changes to the template files ship automatically. Bare RN projects have no such hook — when you upgrade `react-native-tap-to-pix`, check the release notes: if `PixTapToPixService.kt.tmpl` or `apduservice.xml` changed, re-apply the copy steps above.
+
 ## API
 
 All runtime functions are no-ops (return `false` / `null`) when the native module isn't available (iOS, web, or the module failed to link).
