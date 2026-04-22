@@ -8,7 +8,7 @@
     "build",
     "android",
     "android-native-templates",
-    "plugin",
+    "plugin/build",
     "app.plugin.js",
     "expo-module.config.json",
     "README.md",
