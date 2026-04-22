@@ -1,6 +1,6 @@
 {
   "name": "react-native-tap-to-pix",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "React Native library implementing BACEN's 'Pix por aproximação para Android' (Tap to Pix) protocol. Ships the HCE service, AID registration, Expo config plugin, and a native bridge for the Android Default Contactless Payment App settings. Android only.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
