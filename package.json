@@ -17,7 +17,13 @@
   "scripts": {
     "build": "tsc && tsc --project plugin/tsconfig.json",
     "clean": "rm -rf build plugin/build",
-    "prepublishOnly": "npm run clean && npm run build"
+    "typecheck": "tsc --noEmit && tsc --noEmit --project plugin/tsconfig.json",
+    "pack:check": "npm pack --dry-run",
+    "publish:dry": "npm publish --dry-run",
+    "prepack": "npm run clean && npm run build",
+    "release:patch": "npm version patch && npm publish",
+    "release:minor": "npm version minor && npm publish",
+    "release:major": "npm version major && npm publish"
   },
   "keywords": [
     "react-native",
