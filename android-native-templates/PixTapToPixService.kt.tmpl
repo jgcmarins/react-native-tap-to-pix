@@ -1,0 +1,248 @@
+package __PACKAGE__.nfc
+
+import android.content.Intent
+import android.net.Uri
+import android.nfc.cardemulation.HostApduService
+import android.os.Bundle
+import android.util.Log
+
+/**
+ * HCE service for the BACEN "Pix por aproximação" protocol.
+ *
+ * Runs in response to APDU traffic from a POS terminal once Android matches
+ * the registered AID (A000000940BCB000, see apduservice.xml).
+ *
+ * Protocol (BACEN spec v1.0, 05/06/2025 — §2.3):
+ *   1. POS sends SELECT AID. Reply 0x9000 (OK) and clear the buffer.
+ *   2. POS sends one or more UPDATE BINARY commands with a 15-bit offset
+ *      (P1 P2) and a payload chunk. Write the chunk at `offset` in the
+ *      buffer and reply 0x9000.
+ *   3. POS disconnects (drops the NFC field). Android calls onDeactivated().
+ *      Parse the buffer as an NDEF URI record, extract the `pix://` URI,
+ *      and fire ACTION_VIEW — which the host app picks up via the `pix`
+ *      scheme intent filter it registered in AndroidManifest.
+ *
+ * Everything after the Intent fire is plain Android + React Native deep link.
+ * The library's contract ends here: the host app's catch-all route receives
+ * the `pix://...?qr=<EMV>` URI and decides what to do next.
+ */
+class PixTapToPixService : HostApduService() {
+
+    private val buffer = ByteArray(MAX_NDEF_SIZE)
+    private var highWaterMark: Int = 0
+    private var selected: Boolean = false
+
+    override fun processCommandApdu(commandApdu: ByteArray?, extras: Bundle?): ByteArray {
+        if (commandApdu == null || commandApdu.size < 2) return SW_UNKNOWN
+
+        logHex("APDU cmd", commandApdu)
+
+        val cla = commandApdu[0].toInt() and 0xFF
+        val ins = commandApdu[1].toInt() and 0xFF
+
+        // SELECT (ISO 7816-4: CLA=00, INS=A4). Accept any P1/P2 that the
+        // Android HCE subsystem routed here — the AID match already
+        // happened at the OS level.
+        if (cla == 0x00 && ins == 0xA4) {
+            buffer.fill(0)
+            highWaterMark = 0
+            selected = true
+            return SW_OK
+        }
+
+        // UPDATE BINARY (CLA=00, INS=D6). P1/P2 carry a 15-bit offset; the
+        // first bit of P1 is reserved per ISO 7816-4 for short EFID usage
+        // and must be 0 here (P1 has the MSB=0 to indicate offset addressing).
+        if (cla == 0x00 && ins == 0xD6) {
+            if (!selected) return SW_UNKNOWN
+
+            val p1 = commandApdu[2].toInt() and 0xFF
+            val p2 = commandApdu[3].toInt() and 0xFF
+            val offset = ((p1 and 0x7F) shl 8) or p2
+
+            // Lc parsing. Short form: one byte at index 4. Extended form:
+            // 0x00 at index 4 followed by 2 length bytes. The BACEN spec
+            // (§2.4, tables 4 and 5) allows both.
+            val (dataOffset, dataLength) = when {
+                commandApdu.size >= 5 && commandApdu[4].toInt() and 0xFF == 0x00 && commandApdu.size >= 7 -> {
+                    val len = ((commandApdu[5].toInt() and 0xFF) shl 8) or
+                        (commandApdu[6].toInt() and 0xFF)
+                    7 to len
+                }
+                commandApdu.size >= 5 -> {
+                    val len = commandApdu[4].toInt() and 0xFF
+                    5 to len
+                }
+                else -> return SW_UNKNOWN
+            }
+
+            if (offset < 0 || offset + dataLength > buffer.size) {
+                Log.w(TAG, "Chunk out of bounds: offset=$offset len=$dataLength")
+                return SW_UNKNOWN
+            }
+            if (dataOffset + dataLength > commandApdu.size) {
+                Log.w(TAG, "Declared chunk length exceeds APDU")
+                return SW_UNKNOWN
+            }
+
+            System.arraycopy(commandApdu, dataOffset, buffer, offset, dataLength)
+            if (offset + dataLength > highWaterMark) {
+                highWaterMark = offset + dataLength
+            }
+            return SW_OK
+        }
+
+        return SW_UNKNOWN
+    }
+
+    override fun onDeactivated(reason: Int) {
+        Log.d(TAG, "onDeactivated reason=$reason highWaterMark=$highWaterMark")
+        if (highWaterMark <= 0 || !selected) {
+            resetState()
+            return
+        }
+
+        val payload = buffer.copyOf(highWaterMark)
+        val uri = parseNdefUri(payload)
+        resetState()
+
+        if (uri == null) {
+            Log.w(TAG, "Could not extract pix:// URI from NDEF buffer")
+            return
+        }
+        if (!uri.startsWith("pix://")) {
+            Log.w(TAG, "Extracted URI is not pix scheme: $uri")
+            return
+        }
+
+        Log.i(TAG, "Firing ACTION_VIEW for pix URI (len=${uri.length})")
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT)
+        }
+        try {
+            startActivity(intent)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to startActivity for pix URI", t)
+        }
+    }
+
+    private fun resetState() {
+        highWaterMark = 0
+        selected = false
+    }
+
+    /**
+     * Walk an NDEF message (one record, type=URI) and return the URI string.
+     *
+     * Short form header (§2.3 table 3):  D1 01 <len:1B> 55 00 <payload>
+     * Long  form header (§2.3 table 2):  C1 01 <len:4B> 55 00 <payload>
+     *
+     * Both are tolerated. Other NDEF shapes (SR=0 with 4-byte length,
+     * multiple records, non-URI types) are out of scope — the BACEN spec
+     * mandates exactly one URI record, and apps can legitimately ignore
+     * other shapes.
+     */
+    private fun parseNdefUri(data: ByteArray): String? {
+        if (data.isEmpty()) return null
+        val header = data[0].toInt() and 0xFF
+        val shortRecord = (header and 0x10) != 0
+
+        var cursor = 1
+        if (cursor >= data.size) return null
+        val typeLength = data[cursor].toInt() and 0xFF
+        cursor += 1
+
+        val payloadLength: Int
+        if (shortRecord) {
+            if (cursor >= data.size) return null
+            payloadLength = data[cursor].toInt() and 0xFF
+            cursor += 1
+        } else {
+            if (cursor + 3 >= data.size) return null
+            payloadLength =
+                ((data[cursor].toInt() and 0xFF) shl 24) or
+                ((data[cursor + 1].toInt() and 0xFF) shl 16) or
+                ((data[cursor + 2].toInt() and 0xFF) shl 8) or
+                (data[cursor + 3].toInt() and 0xFF)
+            cursor += 4
+        }
+
+        if (typeLength != 1 || cursor >= data.size) return null
+        val recordType = data[cursor].toInt() and 0xFF
+        cursor += 1
+        // 0x55 = 'U' = URI record type
+        if (recordType != 0x55) return null
+
+        if (cursor >= data.size) return null
+        val uriPrefixByte = data[cursor].toInt() and 0xFF
+        cursor += 1
+        val uriBytesLength = payloadLength - 1
+        if (uriBytesLength <= 0 || cursor + uriBytesLength > data.size) return null
+
+        val uriBody = String(data, cursor, uriBytesLength, Charsets.UTF_8)
+        val prefix = NDEF_URI_PREFIXES.getOrNull(uriPrefixByte) ?: ""
+        return prefix + uriBody
+    }
+
+    private fun logHex(tag: String, data: ByteArray) {
+        if (!DEBUG) return
+        val preview = data.take(32).joinToString(" ") { "%02X".format(it) }
+        val suffix = if (data.size > 32) " …(${data.size} bytes)" else ""
+        Log.d(TAG, "$tag: $preview$suffix")
+    }
+
+    companion object {
+        private const val TAG = "PixTapToPixService"
+        private const val DEBUG = true
+        private const val MAX_NDEF_SIZE = 32 * 1024
+
+        private val SW_OK = byteArrayOf(0x90.toByte(), 0x00.toByte())
+        private val SW_UNKNOWN = byteArrayOf(0x6D.toByte(), 0x00.toByte())
+
+        // NFC Forum URI Record Type Definition — prefix table.
+        // Index 0 = "" (no abbreviation, full URI follows as-is).
+        // Higher indices are common schemes; the full table is kept here
+        // because some POS vendors may use index 1 ("http://www.") or
+        // similar, even though the BACEN spec illustrates index 0 for the
+        // custom pix:// scheme.
+        private val NDEF_URI_PREFIXES = arrayOf(
+            "",
+            "http://www.",
+            "https://www.",
+            "http://",
+            "https://",
+            "tel:",
+            "mailto:",
+            "ftp://anonymous:anonymous@",
+            "ftp://ftp.",
+            "ftps://",
+            "sftp://",
+            "smb://",
+            "nfs://",
+            "ftp://",
+            "dav://",
+            "news:",
+            "telnet://",
+            "imap:",
+            "rtsp://",
+            "urn:",
+            "pop:",
+            "sip:",
+            "sips:",
+            "tftp:",
+            "btspp://",
+            "btl2cap://",
+            "btgoep://",
+            "tcpobex://",
+            "irdaobex://",
+            "file://",
+            "urn:epc:id:",
+            "urn:epc:tag:",
+            "urn:epc:pat:",
+            "urn:epc:raw:",
+            "urn:epc:",
+            "urn:nfc:",
+        )
+    }
+}

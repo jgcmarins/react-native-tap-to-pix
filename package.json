@@ -1,0 +1,61 @@
+{
+  "name": "react-native-tap-to-pix",
+  "version": "0.1.0",
+  "description": "React Native library implementing BACEN's 'Pix por aproximação para Android' (Tap to Pix) protocol. Ships the HCE service, AID registration, Expo config plugin, and a native bridge for the Android Default Contactless Payment App settings. Android only.",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "files": [
+    "build",
+    "android",
+    "android-native-templates",
+    "plugin",
+    "app.plugin.js",
+    "expo-module.config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && tsc --project plugin/tsconfig.json",
+    "clean": "rm -rf build plugin/build",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "expo-module",
+    "expo-config-plugin",
+    "pix",
+    "bacen",
+    "tap-to-pix",
+    "pix-por-aproximacao",
+    "nfc",
+    "hce",
+    "host-card-emulation",
+    "android"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jgcmarins/react-native-tap-to-pix.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jgcmarins/react-native-tap-to-pix/issues"
+  },
+  "homepage": "https://github.com/jgcmarins/react-native-tap-to-pix#readme",
+  "author": "jgcmarins",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*",
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@expo/config-plugins": "^9.0.0",
+    "@types/react": "^19.0.0",
+    "expo-modules-core": "^2.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

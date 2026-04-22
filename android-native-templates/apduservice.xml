@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Tap to Pix HCE service declaration.
+  AID A000000940BCB000 is the BACEN-published identifier for "Pix por
+  aproximação" (see the BACEN spec v1.0, 05/06/2025, §2.1).
+
+  category="payment" is required because Google Wallet claims this AID as a
+  payment category on recent Android builds, and Android refuses to let a
+  category="other" service take over via setPreferredService from a
+  category="payment" default — on real POS taps the APDUs never reach an
+  "other"-category service, they go straight to Google Wallet.
+
+  With category="payment" the host app shows up as a Default Contactless
+  Payment App candidate, and the user marks it in
+    Settings → Connected devices → Connection preferences → NFC
+           → "Default contactless payment app".
+  From that point on, every tap on the BACEN AID routes to the host app even
+  when it is not in foreground; setPreferredService keeps working as an extra
+  override for screens that claim it.
+
+  requireDeviceUnlock="false" lets the tap fire on the lock screen. The host
+  app is expected to gate the actual payment release behind biometrics / PIN,
+  so this is safe.
+-->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/tap_to_pix_description"
+    android:requireDeviceUnlock="false">
+    <aid-group
+        android:description="@string/tap_to_pix_aid_group"
+        android:category="payment">
+        <aid-filter android:name="A000000940BCB000" />
+    </aid-group>
+</host-apdu-service>

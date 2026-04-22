@@ -1,0 +1,42 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+build/
+lib/
+dist/
+*.tsbuildinfo
+
+# Android
+android/.gradle/
+android/.idea/
+android/build/
+android/.cxx/
+android/local.properties
+*.keystore
+!debug.keystore
+
+# Example app (when added)
+example/node_modules/
+example/android/.gradle/
+example/android/build/
+example/android/app/build/
+example/.expo/
+example/.expo-shared/
+example/ios/
+example/web-build/
+
+# Editors
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local
+.env.*.local
